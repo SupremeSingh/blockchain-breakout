@@ -32,9 +32,9 @@
             console.log("Please log in with wallet");
           }
         } else {
-            let userAddress = user.get("ethAddress");
-            console.log(`${userAddress} is now logged in`);
-            game = new Phaser.Game(config);
+          let userAddress = user.get("ethAddress");
+          console.log(`${userAddress} is now logged in`);
+          game = new Phaser.Game(config);
         }
       }
 
@@ -71,26 +71,46 @@
 
       var platforms;
       var player;
+      var stars;
+
+      var competitors = {};
+
+      var score = 0;
+      var scoreText;
       var cursors;
+
+      function collectStar(player, star) {
+        star.disableBody(true, true);
+
+        // Query server for position - if coming down from range to range then give score
+        
+        score += 10;
+        scoreText.setText("Score: " + score);
+      }
 
       // Bringing digital assets into the game
       function preload() {
         this.load.image("backgroud", "assets/BG.png");
         this.load.image("ground", "assets/Tiles/tile (2).png");
         this.load.image("player", "assets/player.png");
+        this.load.image("sign", "assets/basketball.png");
       }
 
       // Setting the scene
-      function create() {
+      async function create() {
         this.add.image(400, 300, "backgroud").setScale(0.55);
+
         platforms = this.physics.add.staticGroup();
 
         platforms.create(335, 568, "ground").setScale(0.5).refreshBody();
         platforms.create(400, 568, "ground").setScale(0.5).refreshBody();
         platforms.create(465, 568, "ground").setScale(0.5).refreshBody();
 
+        stars = this.physics.add.staticGroup();
+        stars.create(400, 200, "sign").setScale(0.3).refreshBody();
+
         player = this.physics.add
-          .sprite(400, 200, "player")
+          .sprite(400, 400, "player")
           .setScale(0.4)
           .refreshBody();
 
@@ -98,13 +118,49 @@
         player.setCollideWorldBounds(false);
 
         this.physics.add.collider(player, platforms);
+        this.physics.add.collider(stars, platforms);
 
         cursors = this.input.keyboard.createCursorKeys();
+        this.physics.add.overlap(player, stars, collectStar, null, this);
 
+        // Write the score
+        scoreText = this.add.text(16, 16, "score: 0", {
+          fontSize: "32px",
+          fill: "#af2",
+        });
+
+        // Get input information about other user
+        let user = Moralis.User.current();
+
+        let query = new Moralis.Query("PlayerPosition");
+        let subscription = await query.subscribe();
+
+        subscription.on("create", (playerLocation) => {
+          let thisPlayerAddress = playerLocation.get("player");
+          if (thisPlayerAddress != user.get("ethAddress")) {
+            // If this player is seen for the first time
+            if (competitors[thisPlayerAddress] == undefined) {
+              competitors[thisPlayerAddress] = this.image.add
+                .sprite(
+                  playerLocation.get("x"),
+                  playerLocation.get("y"),
+                  "player"
+                )
+                .setScale(0.4)
+                .refreshBody();
+            } else {
+              competitors[thisPlayerAddress].x = playerLocation.get("x");
+              competitors[thisPlayerAddress].x = playerLocation.get("y");
+            }
+
+            console.log("A player moved");
+            console.log(`${playerLocation.get("player")} has moved`);
+          }
+        });
       }
 
       // Updates the frame 60 times a second
-      function update() {
+      async function update() {
         if (cursors.left.isDown) {
           player.setVelocityX(-160);
 
@@ -121,6 +177,23 @@
 
         if (cursors.up.isDown && player.body.touching.down) {
           player.setVelocityY(-330);
+        }
+
+        // Update position of player in DB
+        if (player.lastX != player.x || player.lastY != player.y) {
+          let user = Moralis.User.current();
+
+          const PlayerPosition = Moralis.Object.extend("PlayerPosition");
+          const playerPosition = new PlayerPosition();
+
+          playerPosition.set("player", user.get("ethAddress"));
+          playerPosition.set("X", player.x);
+          playerPosition.set("Y", player.y);
+
+          playerPosition.lastX = playerPosition.x;
+          playerPosition.lastY = playerPosition.y;
+
+          await playerPosition.save();
         }
       }
     </script>
